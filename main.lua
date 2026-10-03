@@ -1,5 +1,3 @@
---!nocheck
--- Epic AI Remake | Tek dosya (executor / client-only)
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
@@ -13,7 +11,7 @@ local SEND_ICON = "rbxthumb://type=Asset&id=12804017070&w=150&h=150"
 local ICON_SIZE = 20
 local MAX_CHATS, MAX_MSGS = 25, 40
 
-local API_KEY = "AQ.Ab8RN6IHhUf2TEftaOiSANB9U7Df-HDtlizOj62N2_VFeqefNw"
+local API_KEY = "AQ.Ab8RN6KW6uz6oGDByISaUGejwu2KKkOWLpkSIVcr48gMRTYvbg"
 local MODEL = "gemini-flash-lite-latest" -- 404 verirse "gemini-2.5-flash-lite" dene
 
 local SYSTEM_BASE = [==[You are Epic AI Remake, a friendly AI assistant for Roblox scripters who run scripts with a Roblox executor. You chat like a normal person, and you write code for executors when asked.
