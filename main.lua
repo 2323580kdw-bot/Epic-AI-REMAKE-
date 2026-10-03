@@ -11,15 +11,10 @@ local SEND_ICON = "rbxthumb://type=Asset&id=12804017070&w=150&h=150"
 local ICON_SIZE = 20
 local MAX_CHATS, MAX_MSGS = 25, 40
 
-local API_KEY = "AQ.Ab8RN6KW6uz6oGDByISaUGejwu2KKkOWLpkSIVcr48gMRTYvbg"
+local API_KEY = "AQ.Ab8RN6LNyKw5E5grEckHR4BSV_xGzSDzOL0RKVDGwIkhX4ZbPg"
 local MODEL = "gemini-flash-lite-latest" -- 404 verirse "gemini-2.5-flash-lite" dene
 
-local SYSTEM_BASE = [==[You are Epic AI Remake, a friendly AI assistant for Roblox scripters who run scripts with a Roblox executor. You chat like a normal person, and you write code for executors when asked.
-
-WHEN TO WRITE CODE:
-- Talk normally. Only write code when the user clearly asks for it (a script, code, a fix, a change, a new feature, an auto farm or auto clicker and similar).
-- For greetings, questions, explanations, opinions, ideas and general chat, answer in plain conversational words with no code blocks. Only add a one or two line snippet if it is truly needed to answer.
-- When code is asked, give the full ready-to-run script, following the rules below.
+local SYSTEM_BASE = [==[You are Epic AI Remake, an AI coding assistant for Roblox scripters. The user runs scripts with a Roblox executor, so you write code for executors.
 
 EXECUTOR CODE RULES:
 - Write every script as ONE self-contained script that can be pasted and executed directly in an executor. Never tell the user to create a LocalScript, Script, ModuleScript or RemoteEvent in Roblox Studio, and never split code into server and client parts.
@@ -29,25 +24,17 @@ EXECUTOR CODE RULES:
 - Use modern Luau (task library, no deprecated wait/spawn). Keep explanations short and put the code first.
 
 GAME AWARENESS:
-- When a GAME CONTEXT block is provided after these instructions, it is an automatic scan of the game the user is playing right now: remotes, scripts (with decompiled code excerpts), click targets, proximity prompts, GUI buttons, tools and the player's stats. A FOCUSED SEARCH block, when present, contains the objects and code that matched the user's request. Treat both as ground truth about this game.
+- When a GAME CONTEXT block is provided after these instructions, it is an automatic scan of the game the user is playing right now: remotes, scripts (with decompiled code excerpts), click targets, proximity prompts, GUI buttons, tools and the player's stats. Treat it as ground truth about this game.
 - When the user asks for something game-specific (auto clicker, auto farm, auto collect, auto sell and similar), first search the context for the system behind it: the money/currency values, the button, ClickDetector, ProximityPrompt or tool that earns it, and the remote the game's own code fires, with the arguments shown in the excerpts. Say in one or two short lines what you found and which object or remote you based the script on, then give the script.
 - Use the exact paths, names and remote arguments from the context. Never invent remotes, paths or arguments that are not in it. If the data is not enough to be sure (for example the arguments of a remote are unknown), say exactly what is missing and write the most reliable version you can, for example one that triggers the real button, ClickDetector or ProximityPrompt instead of the remote.
 - Prefer driving what the game already exposes to the client (fireclickdetector, fireproximityprompt, the button's own connections or signals, or the same remote with the same arguments the game's own code uses). Add an on/off toggle and a sensible delay so the script does not spam.
-- If the context says the scan is unavailable or turned off, tell the user that briefly (only when they ask for something game-specific) and write a generic script instead.
+- If the context says the scan is still running, unavailable or turned off, tell the user that briefly and write a generic script instead.
 
 HOW YOU BEHAVE:
 - Listen to the user and do what they ask, the way they ask for it. Follow their instructions, naming, style and requests closely. If something is unclear, make a sensible assumption and mention it briefly instead of refusing.
 - Helping with coding is your whole job. Never say things like "I can't help with coding", "I'm not able to write that code" or "as an AI I can't". Refusing or dodging a normal coding request breaks this app's usage rules, so always give a real, working answer.
 - Be friendly, casual and concise, like a dev friend.
 - Get straight to the point. Do not add filler such as "Of course!" or "Sure!", and never tell the user to paste or run the script in their executor, they already know how to do that.]==]
-
-local INTENT_PROMPT = [==[You analyze the latest message of a user who is chatting with a Roblox scripting assistant. Return ONLY a JSON object with exactly this shape:
-{"wants_code": boolean, "needs_game": boolean, "topic": string, "keywords": string[]}
-
-- wants_code: true only if the user is asking for a script, code, a fix, a modification or a feature to be written. Greetings, casual chat, questions about concepts, or questions about the game that do not ask for code are false.
-- needs_game: true if answering well requires knowing how THIS game works (its scripts, remotes, buttons, currency), for example auto farm, auto clicker, auto collect, auto sell requests, or questions about this game's systems. Generic scripts that do not depend on the game (fly, ESP, UI libraries) are false.
-- topic: a short English summary of the goal (2 to 6 words), or an empty string for casual chat.
-- keywords: up to 8 lowercase single English words likely to appear in the names, text or code of the relevant game objects (for example click, tap, coin, cash, money, collect, sell). If the message is not in English, still output English keywords. Empty array for casual chat.]==]
 
 local function buildSystemPrompt(lang)
 	return "LANGUAGE (very important):\n- The user chose " .. lang .. " as the reply language. Write every reply, explanation and code comment in " .. lang .. ", even if the user's message or earlier messages are written in another language.\n- Only switch language if the user explicitly asks you to reply in a different one.\n- Keep code, variable names and Roblox API names in English.\n\n" .. SYSTEM_BASE
@@ -112,7 +99,7 @@ local clipFn = setclipboard or toclipboard
 
 -- Settings (saved between sessions)
 local currentLang = "English"
-local aware = true -- "Scan game" mode: scan + analyze the prompt + tailor the code
+local aware = true -- let the AI see the game (auto scan)
 local function saveSettings()
 	if not hasFS then return end
 	pcall(function()
@@ -224,7 +211,7 @@ local function sanitize(data)
 			local msgs = {}
 			for _, m in ipairs(c.messages) do
 				if type(m) == "table" and (m.r == "user" or m.r == "ai") and type(m.t) == "string" then
-					table.insert(msgs, {r = m.r, t = m.t, n = (type(m.n) == "string") and m.n or nil})
+					table.insert(msgs, {r = m.r, t = m.t})
 				end
 			end
 			table.insert(out, {id = c.id, title = c.title, messages = msgs})
@@ -325,11 +312,16 @@ stroke(settingsBtn)
 local content = new("Frame", {Size = UDim2.new(1, -210, 1, 0), Position = UDim2.new(0, 210, 0, 0),
 	BackgroundTransparency = 1}, main)
 
--- Header (drag area + language button + X unload button)
+-- Header (drag area + scan chip + language button + X unload button)
 local header = new("Frame", {Size = UDim2.new(1, 0, 0, 56), BackgroundTransparency = 1}, content)
-local headerLabel = new("TextLabel", {Size = UDim2.new(1, -200, 1, 0), Position = UDim2.new(0, 22, 0, 0),
+local headerLabel = new("TextLabel", {Size = UDim2.new(0, 80, 1, 0), Position = UDim2.new(0, 22, 0, 0),
 	BackgroundTransparency = 1, Text = "Chat", TextColor3 = C.sub, Font = Enum.Font.GothamMedium, TextSize = 14,
 	TextXAlignment = Enum.TextXAlignment.Left}, header)
+local scanChip = new("TextLabel", {Size = UDim2.new(1, -330, 0, 22), Position = UDim2.new(0, 104, 0.5, -11),
+	BackgroundColor3 = C.tint, Text = "Game scan", TextColor3 = C.user, Font = Enum.Font.GothamMedium,
+	TextSize = 12, TextTruncate = Enum.TextTruncate.AtEnd}, header)
+corner(scanChip, 11)
+pad(scanChip, 0, 0, 10, 10)
 local closeBtn = new("TextButton", {Size = UDim2.fromOffset(34, 34), Position = UDim2.new(1, -48, 0.5, -17),
 	BackgroundColor3 = C.card, Text = "X", TextColor3 = C.sub, Font = Enum.Font.GothamBold, TextSize = 15}, header)
 corner(closeBtn, 17)
@@ -361,7 +353,7 @@ do
 end
 
 -- Chat area (welcome + messages)
-local area = new("Frame", {Size = UDim2.new(1, 0, 1, -170), Position = UDim2.new(0, 0, 0, 56),
+local area = new("Frame", {Size = UDim2.new(1, 0, 1, -142), Position = UDim2.new(0, 0, 0, 56),
 	BackgroundTransparency = 1}, content)
 
 local welcome = new("Frame", {Size = UDim2.new(1, -48, 1, 0), Position = UDim2.new(0, 24, 0, 0),
@@ -376,7 +368,7 @@ new("TextLabel", {Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Lay
 local grid = new("Frame", {Size = UDim2.new(1, 0, 0, 108), BackgroundTransparency = 1, LayoutOrder = 4}, welcome)
 new("UIGridLayout", {CellSize = UDim2.new(0.5, -6, 0, 50), CellPadding = UDim2.fromOffset(12, 8),
 	HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder}, grid)
-local chips = {"Make an auto clicker", "Find the money system", "What can you do?", "Fix this code"}
+local chips = {"Make an auto clicker", "Find the money system", "Write a Lua script", "Fix this code"}
 local chipButtons = {}
 for i, t in ipairs(chips) do
 	local b = new("TextButton", {BackgroundColor3 = C.card, Text = t, TextColor3 = C.text,
@@ -409,22 +401,8 @@ new("ImageLabel", {Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE), AnchorPoint = 
 	Position = UDim2.fromScale(0.5, 0.5), BackgroundTransparency = 1, Image = SEND_ICON,
 	ScaleType = Enum.ScaleType.Fit}, sendBtn)
 
--- DeepSeek-style toggle pill above the input bar
-local pills = new("Frame", {Size = UDim2.new(1, -48, 0, 28), Position = UDim2.new(0, 24, 1, -110),
-	BackgroundTransparency = 1}, content)
-local scanPill = new("TextButton", {Size = UDim2.fromOffset(116, 28), BackgroundColor3 = C.card, Text = "",
-	AutoButtonColor = false}, pills)
-corner(scanPill, 14)
-local scanPillStroke = stroke(scanPill)
-local scanDot = new("Frame", {Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 12, 0.5, -4),
-	BackgroundColor3 = Color3.fromRGB(180, 180, 195), BorderSizePixel = 0}, scanPill)
-corner(scanDot, 4)
-local scanPillLabel = new("TextLabel", {Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 26, 0, 0),
-	BackgroundTransparency = 1, Text = "Scan game", TextColor3 = C.sub, Font = Enum.Font.GothamMedium, TextSize = 12,
-	TextXAlignment = Enum.TextXAlignment.Left}, scanPill)
-
 -- Toast
-local toast = new("TextLabel", {Size = UDim2.fromOffset(260, 34), Position = UDim2.new(0.5, -130, 1, -152),
+local toast = new("TextLabel", {Size = UDim2.fromOffset(260, 34), Position = UDim2.new(0.5, -130, 1, -124),
 	BackgroundColor3 = C.text, TextColor3 = Color3.new(1, 1, 1), Text = "",
 	Font = Enum.Font.GothamMedium, TextSize = 13, Visible = false, ZIndex = 10}, content)
 corner(toast, 17)
@@ -448,8 +426,7 @@ end
 -- =====================================================================
 -- Game scanner: gives the AI eyes on the game the user is in
 -- =====================================================================
-local scan = {state = "idle", text = "", counts = {}, canDecompile = false, took = 0, err = nil,
-	remotes = {}, buttons = {}, prompts = {}, clicks = {}, scripts = {}}
+local scan = {state = "idle", text = "", counts = {}, canDecompile = false, took = 0, err = nil}
 local scanId = 0
 local updateScanUI = function() end
 
@@ -537,23 +514,6 @@ local function safeDecompile(inst)
 	return done and result or nil
 end
 
--- Decompiled source cache (so focused searches don't redo work)
-local srcCache, srcOrder = {}, {}
-local function getSource(inst)
-	if srcCache[inst] then return srcCache[inst] end
-	local src = safeDecompile(inst)
-	if src then
-		src = cut(src, 80000)
-		srcCache[inst] = src
-		table.insert(srcOrder, inst)
-		if #srcOrder > 40 then
-			local old = table.remove(srcOrder, 1)
-			srcCache[old] = nil
-		end
-	end
-	return src
-end
-
 local LINE_KEYS = {"FireServer", "InvokeServer", ":Fire(", "leaderstats", "Activated", "MouseButton1Click",
 	"MouseButton1Down", "Touched", "ClickDetector", "MouseClick", "Triggered", "RemoteEvent", "RemoteFunction",
 	"Coins", "Cash", "Money", "Gold", "Gems", "Click", "Collect", "Sell", "Reward"}
@@ -581,32 +541,6 @@ local function excerpt(src, isHot)
 			local t = line:gsub("^%s+", "")
 			if t ~= "" then table.insert(out, ("L%d: %s"):format(ln, cut(t, 120))) end
 			if #out >= 15 then break end
-		end
-	end
-	return table.concat(out, "\n")
-end
-
--- Same idea, but also keeps lines that mention the request's keywords
-local function excerptFocus(src, kws)
-	local out, chars, ln = {}, 0, 0
-	for line in (src .. "\n"):gmatch("([^\n]*)\n") do
-		ln += 1
-		local hit = false
-		for _, k in ipairs(LINE_KEYS) do
-			if line:find(k, 1, true) then hit = true break end
-		end
-		if not hit then
-			local l = line:lower()
-			for _, k in ipairs(kws) do
-				if k ~= "" and l:find(k, 1, true) then hit = true break end
-			end
-		end
-		if hit then
-			local t = line:gsub("^%s+", "")
-			t = cut(t, 170)
-			table.insert(out, ("L%d: %s"):format(ln, t))
-			chars += #t + 8
-			if #out >= 70 or chars >= 6000 then break end
 		end
 	end
 	return table.concat(out, "\n")
@@ -730,7 +664,7 @@ local function runScan(my)
 			if os.clock() - tDec > 18 then break end
 			if s.score >= 2 then
 				attempts += 1
-				local src = getSource(s.inst)
+				local src = safeDecompile(s.inst)
 				if src and #src > 20 then
 					local ex = excerpt(src, s.hot)
 					if ex ~= "" then
@@ -845,7 +779,6 @@ local function runScan(my)
 	scan.counts = cnt
 	scan.took = os.clock() - t0
 	scan.err = nil
-	scan.remotes, scan.buttons, scan.prompts, scan.clicks, scan.scripts = remotes, buttons, prompts, clicks, scripts
 	scan.state = "done"
 	updateScanUI()
 end
@@ -877,22 +810,52 @@ local function pick(t, ...)
 	return nil
 end
 
--- One Gemini call. Returns data, or nil + error text
-local function postGemini(payload)
+local function askGemini(history)
 	if #requestFns == 0 then
-		return nil, "No HTTP request function found in this executor."
+		return {ok = false, text = "No HTTP request function found in this executor."}
 	end
-	local body = HttpService:JSONEncode(payload)
+	local contents = {}
+	for _, m in ipairs(history) do
+		table.insert(contents, {role = (m.r == "user") and "user" or "model", parts = {{text = tostring(m.t)}}})
+	end
+	while #contents > 0 and contents[1].role ~= "user" do table.remove(contents, 1) end
+	if #contents == 0 then return {ok = false, text = "Bad request."} end
+
+	-- Hidden language reminder on the latest user message (only in the request, never shown or saved)
+	local lang = currentLang
+	local last = contents[#contents]
+	if last.role == "user" then
+		last.parts[1].text = last.parts[1].text .. "\n\n[Reminder: write your entire reply in " .. lang .. ".]"
+	end
+
+	-- System prompt + live game context
+	local sys = buildSystemPrompt(lang)
+	if aware then
+		if scan.state == "done" and scan.text ~= "" then
+			sys = sys .. "\n\n" .. scan.text .. "\n\nLive player stats right now: " .. playerStats()
+		elseif scan.state == "scanning" then
+			sys = sys .. "\n\n[GAME CONTEXT: the automatic game scan is still running, so no game data is available yet. If the user asks for something game-specific, tell them to wait a few seconds and ask again.]"
+		else
+			sys = sys .. "\n\n[GAME CONTEXT: the game scan is unavailable.]"
+		end
+	else
+		sys = sys .. "\n\n[GAME CONTEXT: game awareness is turned off in the settings.]"
+	end
+
+	local payload = HttpService:JSONEncode({
+		systemInstruction = {parts = {{text = sys}}},
+		contents = contents,
+	})
 	local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. MODEL .. ":generateContent"
 
 	-- Try each request function until one gives a real response body
-	local tried, rbody, status = {}, nil, nil
+	local tried, body, status = {}, nil, nil
 	for _, rf in ipairs(requestFns) do
 		local ok, res = pcall(rf.fn, {
 			Url = url,
 			Method = "POST",
 			Headers = {["Content-Type"] = "application/json", ["x-goog-api-key"] = API_KEY},
-			Body = body,
+			Body = payload,
 		})
 		if not ok then
 			table.insert(tried, rf.name .. ": " .. cut(tostring(res), 80))
@@ -902,29 +865,26 @@ local function postGemini(payload)
 			local b = pick(res, "Body", "body")
 			local st = tonumber(pick(res, "StatusCode", "status_code", "Status", "status"))
 			if type(b) == "string" and b ~= "" then
-				rbody, status = b, st
+				body, status = b, st
 				break
 			else
 				table.insert(tried, rf.name .. ": empty body (status " .. tostring(st) .. ")")
 			end
 		end
 	end
-	if not rbody then
-		return nil, "HTTP request failed. " .. table.concat(tried, " | ")
+	if not body then
+		return {ok = false, text = "HTTP request failed. " .. table.concat(tried, " | ")}
 	end
 
-	local okD, data = pcall(function() return HttpService:JSONDecode(rbody) end)
+	local okD, data = pcall(function() return HttpService:JSONDecode(body) end)
 	if not okD or type(data) ~= "table" then
-		return nil, "Invalid response: " .. cut(rbody, 150)
+		return {ok = false, text = "Invalid response: " .. cut(body, 150)}
 	end
 	if (status and (status < 200 or status >= 300)) or data.error then
 		local msg = data.error and data.error.message or ("HTTP " .. tostring(status))
-		return nil, "Gemini error: " .. tostring(msg)
+		return {ok = false, text = "Gemini error: " .. tostring(msg)}
 	end
-	return data
-end
 
-local function extractText(data)
 	local cand = data.candidates and data.candidates[1]
 	local parts = cand and cand.content and cand.content.parts
 	local out = {}
@@ -936,217 +896,12 @@ local function extractText(data)
 	local text = table.concat(out)
 	if text == "" then
 		local reason = data.promptFeedback and data.promptFeedback.blockReason
-		if reason then return nil, "Blocked by Gemini: " .. tostring(reason) end
-		return nil, "Gemini returned an empty reply (finish reason: " .. tostring(cand and cand.finishReason) .. ")."
-	end
-	return text
-end
-
--- Step 1: understand the request (wants code? needs game data? what topic?)
-local function analyzeIntent(history)
-	local lines = {}
-	for i = math.max(1, #history - 3), #history do
-		local m = history[i]
-		local who = (m.r == "user") and "User" or "Assistant"
-		lines[#lines + 1] = ((i == #history) and "LATEST " or "") .. who .. ": " .. cut(tostring(m.t), 600)
-	end
-	local data = postGemini({
-		systemInstruction = {parts = {{text = INTENT_PROMPT}}},
-		contents = {{role = "user", parts = {{text = table.concat(lines, "\n\n")}}}},
-		generationConfig = {responseMimeType = "application/json", temperature = 0},
-	})
-	if not data then return nil end
-	local text = extractText(data)
-	if not text then return nil end
-	text = text:gsub("^%s*```%a*", "")
-	text = text:gsub("```%s*$", "")
-	local ok, d = pcall(function() return HttpService:JSONDecode(text) end)
-	if not ok or type(d) ~= "table" then return nil end
-	local kws = {}
-	if type(d.keywords) == "table" then
-		for _, k in ipairs(d.keywords) do
-			if type(k) == "string" and #kws < 10 then
-				k = k:lower():gsub("[^%w_]", "")
-				if k ~= "" then kws[#kws + 1] = k end
-			end
+		if reason then
+			return {ok = false, text = "Blocked by Gemini: " .. tostring(reason)}
 		end
+		return {ok = false, text = "Gemini returned an empty reply (finish reason: " .. tostring(cand and cand.finishReason) .. ")."}
 	end
-	return {
-		code = d.wants_code == true,
-		game = d.needs_game == true,
-		topic = (type(d.topic) == "string") and cut(d.topic, 80) or "",
-		keywords = kws,
-	}
-end
-
-local function fallbackKeywords(text)
-	local t = tostring(text or ""):lower()
-	local out = {}
-	for _, k in ipairs(KEYWORDS) do
-		if t:find(k, 1, true) and #out < 8 then out[#out + 1] = k end
-	end
-	if #out == 0 then out = {"click", "coin", "cash", "money", "collect"} end
-	return out
-end
-
-local function kwMatch(s, kws)
-	s = tostring(s or ""):lower()
-	local n = 0
-	for _, k in ipairs(kws) do
-		if k ~= "" and s:find(k, 1, true) then n += 1 end
-	end
-	return n
-end
-
--- Step 2: dig into the game for exactly what the request is about
-local function focusedSearch(kws, topic)
-	local lines = {}
-	local function add(s) lines[#lines + 1] = s end
-	local found = {remotes = 0, ui = 0, scripts = 0}
-	add(('FOCUSED SEARCH for "%s" (keywords: %s):'):format(topic ~= "" and topic or "the request", table.concat(kws, ", ")))
-
-	local rem = {}
-	for _, r in ipairs(scan.remotes) do
-		if kwMatch(r.p, kws) > 0 then rem[#rem + 1] = ("[%s] %s"):format(r.c, r.p) end
-	end
-	found.remotes = #rem
-	if #rem > 0 then
-		add("Matching remotes:")
-		for i, s in ipairs(rem) do
-			if i > 25 then break end
-			add(s)
-		end
-	end
-
-	local ui = {}
-	for _, b in ipairs(scan.buttons) do
-		if kwMatch(b.p .. " " .. b.t, kws) > 0 then ui[#ui + 1] = ('button %s text="%s"'):format(b.p, cut(b.t, 40)) end
-	end
-	for _, p in ipairs(scan.prompts) do
-		if kwMatch(p.p .. " " .. p.a .. " " .. p.o, kws) > 0 then
-			ui[#ui + 1] = ('proximity prompt on %s action="%s" object="%s" hold=%s'):format(p.p, p.a, p.o, tostring(p.h))
-		end
-	end
-	for _, c in ipairs(scan.clicks) do
-		if kwMatch(c.p, kws) > 0 then ui[#ui + 1] = ("click detector on %s"):format(c.p) end
-	end
-	found.ui = #ui
-	if #ui > 0 then
-		add("Matching buttons / prompts / click targets:")
-		for i, s in ipairs(ui) do
-			if i > 25 then break end
-			add(s)
-		end
-	end
-
-	local cands = {}
-	for _, s in ipairs(scan.scripts) do
-		local m = kwMatch(s.p, kws)
-		cands[#cands + 1] = {s = s, m = m, pts = m * 4 + (s.score or 0)}
-	end
-	table.sort(cands, function(a, b) return a.pts > b.pts end)
-	local tDec, blocks = os.clock(), 0
-	for _, c in ipairs(cands) do
-		if blocks >= 6 or os.clock() - tDec > 14 then break end
-		if (c.m > 0 or (c.s.score or 0) >= 3) and c.s.inst.Parent then
-			local src = getSource(c.s.inst)
-			if src and #src > 20 then
-				local ex = excerptFocus(src, kws)
-				if ex ~= "" then
-					add(("--- %s (%s, %d chars) ---"):format(c.s.p, c.s.c, #src))
-					add(ex)
-					blocks += 1
-				end
-			end
-		end
-	end
-	found.scripts = blocks
-
-	local text = table.concat(lines, "\n")
-	if #text > 30000 then text = cut(text, 30000) .. "\n[truncated]" end
-	return text, found
-end
-
-local function lastUserText(history)
-	for i = #history, 1, -1 do
-		if history[i].r == "user" then return tostring(history[i].t) end
-	end
-	return ""
-end
-
--- Full pipeline. setStage(text) updates the "thinking" bubble.
-local function askAI(history, setStage)
-	local lang = currentLang
-	local intent, focused, note = nil, "", nil
-	local includeGlobal = false
-
-	if aware then
-		if scan.state == "scanning" then
-			setStage("Scanning the game")
-			local t = os.clock()
-			while scan.state == "scanning" and os.clock() - t < 45 and not unloaded do task.wait(0.2) end
-		end
-		setStage("Reading your request")
-		intent = analyzeIntent(history)
-		includeGlobal = (intent == nil) or intent.game
-		if includeGlobal and scan.state == "done" then
-			setStage("Searching the game")
-			local kws = (intent and #intent.keywords > 0) and intent.keywords or fallbackKeywords(lastUserText(history))
-			local text, found = focusedSearch(kws, intent and intent.topic or "")
-			focused = text
-			local topicPart = (intent and intent.topic ~= "") and ('"' .. intent.topic .. '" · ') or ""
-			note = ("Searched the game · %s%d remotes · %d UI targets · %d scripts"):format(
-				topicPart, found.remotes, found.ui, found.scripts)
-		end
-	end
-	if unloaded then return {ok = false, text = "Unloaded."} end
-	setStage("Writing")
-
-	local contents = {}
-	for _, m in ipairs(history) do
-		table.insert(contents, {role = (m.r == "user") and "user" or "model", parts = {{text = tostring(m.t)}}})
-	end
-	while #contents > 0 and contents[1].role ~= "user" do table.remove(contents, 1) end
-	if #contents == 0 then return {ok = false, text = "Bad request."} end
-
-	-- Hidden language reminder on the latest user message (only in the request, never shown or saved)
-	local last = contents[#contents]
-	if last.role == "user" then
-		last.parts[1].text = last.parts[1].text .. "\n\n[Reminder: write your entire reply in " .. lang .. ".]"
-	end
-
-	-- System prompt + request analysis + game context
-	local sys = buildSystemPrompt(lang)
-	if aware then
-		if intent then
-			sys = sys .. "\n\nREQUEST ANALYSIS (done automatically before you answer): the user "
-				.. (intent.code and "IS asking for code" or "is NOT asking for code")
-				.. "; game data " .. (intent.game and "is needed" or "is not needed")
-				.. "; topic: " .. (intent.topic ~= "" and intent.topic or "general chat") .. ". "
-				.. (intent.code
-					and "Write the complete script now and customize it to this game using the context below (exact paths, remotes and arguments)."
-					or "Reply like a normal conversation in plain words with no code blocks, unless the message really does ask for code.")
-		end
-		if includeGlobal then
-			if scan.state == "done" and scan.text ~= "" then
-				sys = sys .. "\n\n" .. scan.text .. "\n\nLive player stats right now: " .. playerStats()
-				if focused ~= "" then sys = sys .. "\n\n" .. focused end
-			else
-				sys = sys .. "\n\n[GAME CONTEXT: the game scan is unavailable.]"
-			end
-		end
-	else
-		sys = sys .. "\n\n[GAME CONTEXT: the Scan game mode is turned off, so no game data is available.]"
-	end
-
-	local data, err = postGemini({
-		systemInstruction = {parts = {{text = sys}}},
-		contents = contents,
-	})
-	if not data then return {ok = false, text = err} end
-	local text, why = extractText(data)
-	if not text then return {ok = false, text = why} end
-	return {ok = true, text = text, note = note}
+	return {ok = true, text = text}
 end
 
 -- =====================================================================
@@ -1178,8 +933,8 @@ local function settingRow(order, titleText, subText)
 	return row, sub
 end
 
--- Row 1: Scan game switch (same as the pill above the message box)
-local awareRow = settingRow(1, "Scan game", "Scans the game, reads your request and tailors the code")
+-- Row 1: game awareness toggle
+local awareRow = settingRow(1, "Game awareness", "Let the AI read this game's scripts, remotes and buttons")
 local awareTrack = new("TextButton", {Size = UDim2.fromOffset(44, 24), Position = UDim2.new(1, -58, 0.5, -12),
 	BackgroundColor3 = aware and C.user or Color3.fromRGB(205, 205, 218), Text = "", AutoButtonColor = false}, awareRow)
 corner(awareTrack, 12)
@@ -1187,50 +942,6 @@ local awareKnob = new("Frame", {Size = UDim2.fromOffset(18, 18),
 	Position = aware and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
 	BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0}, awareTrack)
 corner(awareKnob, 9)
-
--- Row 2: scan status + rescan
-local statusRow, statusSub = settingRow(2, "Scan status", "Waiting...")
-local rescanBtn = new("TextButton", {Size = UDim2.fromOffset(78, 30), Position = UDim2.new(1, -92, 0.5, -15),
-	BackgroundColor3 = C.tint, Text = "Rescan", TextColor3 = C.user, Font = Enum.Font.GothamMedium,
-	TextSize = 13}, statusRow)
-corner(rescanBtn, 15)
-
-local function styleScanPill()
-	local on = aware
-	scanPill.BackgroundColor3 = on and C.tint or C.card
-	scanPillStroke.Color = on and Color3.fromRGB(160, 140, 240) or C.stroke
-	scanPillLabel.TextColor3 = on and C.user or C.sub
-	local dot = Color3.fromRGB(180, 180, 195)
-	if on then
-		if scan.state == "scanning" then
-			dot = Color3.fromRGB(240, 170, 40)
-		elseif scan.state == "done" then
-			dot = Color3.fromRGB(50, 170, 100)
-		elseif scan.state == "failed" then
-			dot = Color3.fromRGB(210, 70, 70)
-		end
-	end
-	scanDot.BackgroundColor3 = dot
-end
-
-updateScanUI = function()
-	styleScanPill()
-	local st = scan.state
-	if not aware then
-		statusSub.Text = "Turned off. The AI can't see the game."
-	elseif st == "scanning" then
-		statusSub.Text = "Scanning..."
-	elseif st == "done" then
-		local c = scan.counts
-		statusSub.Text = ("%d remotes · %d scripts · %d decompiled · %d click targets · %.1fs%s"):format(
-			c.remotes or 0, c.scripts or 0, c.decompiled or 0, (c.clicks or 0) + (c.prompts or 0), scan.took or 0,
-			scan.canDecompile and "" or " · no decompile")
-	elseif st == "failed" then
-		statusSub.Text = "Failed: " .. cut(tostring(scan.err or "unknown error"), 70)
-	else
-		statusSub.Text = "Waiting..."
-	end
-end
 
 local function setAware(v)
 	aware = v
@@ -1245,7 +956,13 @@ local function setAware(v)
 	end
 end
 awareTrack.MouseButton1Click:Connect(function() setAware(not aware) end)
-scanPill.MouseButton1Click:Connect(function() setAware(not aware) end)
+
+-- Row 2: scan status + rescan
+local statusRow, statusSub = settingRow(2, "Game scan", "Waiting...")
+local rescanBtn = new("TextButton", {Size = UDim2.fromOffset(78, 30), Position = UDim2.new(1, -92, 0.5, -15),
+	BackgroundColor3 = C.tint, Text = "Rescan", TextColor3 = C.user, Font = Enum.Font.GothamMedium,
+	TextSize = 13}, statusRow)
+corner(rescanBtn, 15)
 rescanBtn.MouseButton1Click:Connect(function()
 	if not aware then
 		setAware(true)
@@ -1253,6 +970,39 @@ rescanBtn.MouseButton1Click:Connect(function()
 		startScan()
 	end
 end)
+
+updateScanUI = function()
+	local st = scan.state
+	if not aware then
+		scanChip.Text = "Game scan off"
+		scanChip.BackgroundColor3 = Color3.fromRGB(236, 236, 242)
+		scanChip.TextColor3 = C.sub
+		statusSub.Text = "Turned off. The AI can't see the game."
+	elseif st == "scanning" then
+		scanChip.Text = "Scanning game..."
+		scanChip.BackgroundColor3 = C.tint
+		scanChip.TextColor3 = C.user
+		statusSub.Text = "Scanning..."
+	elseif st == "done" then
+		local c = scan.counts
+		scanChip.Text = ("Scanned · %d remotes · %d scripts"):format(c.remotes or 0, c.scripts or 0)
+		scanChip.BackgroundColor3 = Color3.fromRGB(223, 246, 230)
+		scanChip.TextColor3 = Color3.fromRGB(34, 120, 70)
+		statusSub.Text = ("%d remotes · %d scripts · %d decompiled · %d click targets · %.1fs%s"):format(
+			c.remotes or 0, c.scripts or 0, c.decompiled or 0, (c.clicks or 0) + (c.prompts or 0), scan.took or 0,
+			scan.canDecompile and "" or " · no decompile")
+	elseif st == "failed" then
+		scanChip.Text = "Scan failed"
+		scanChip.BackgroundColor3 = Color3.fromRGB(251, 226, 226)
+		scanChip.TextColor3 = Color3.fromRGB(170, 40, 40)
+		statusSub.Text = cut(tostring(scan.err or "unknown error"), 80)
+	else
+		scanChip.Text = "Game scan"
+		scanChip.BackgroundColor3 = C.tint
+		scanChip.TextColor3 = C.user
+		statusSub.Text = "Waiting..."
+	end
+end
 
 local settingsOpen = false
 local settingsToken = 0
@@ -1539,17 +1289,10 @@ local function codeBlock(parent, lang, code, layoutOrder)
 	return block
 end
 
-local function renderAIContent(col, text, note)
+local function renderAIContent(col, text)
 	text = tostring(text or "")
 	for _, c in ipairs(col:GetChildren()) do
 		if c:IsA("GuiObject") then c:Destroy() end
-	end
-	if type(note) == "string" and note ~= "" then
-		local nl = new("TextLabel", {Size = UDim2.new(0, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundTransparency = 1, Text = note, TextColor3 = C.sub, Font = Enum.Font.Gotham, TextSize = 12,
-			TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 0}, col)
-		local sc = new("UISizeConstraint", {MaxSize = Vector2.new(maxW() - 26, math.huge)}, nl)
-		table.insert(resizers, function() sc.MaxSize = Vector2.new(maxW() - 26, math.huge) end)
 	end
 	local segs = parseMarkdown(text)
 	if #segs == 0 then segs = {{k = "text", v = text}} end
@@ -1601,7 +1344,7 @@ local function renderMessages(chat)
 				addUserRow(m.t)
 			else
 				local _, col = addAIRow()
-				renderAIContent(col, m.t, m.n)
+				renderAIContent(col, m.t)
 			end
 		end
 		scrollDown()
@@ -1690,13 +1433,11 @@ local function send(text)
 	scrollDown()
 
 	local alive = true
-	local stage = aware and "Reading your request" or "Thinking"
-	local function setStage(s) stage = s end
 	task.spawn(function()
 		local n = 0
 		while alive and not unloaded do
 			n = n % 3 + 1
-			lbl.Text = stage .. string.rep(".", n)
+			lbl.Text = string.rep(".", n)
 			task.wait(0.35)
 		end
 	end)
@@ -1706,16 +1447,16 @@ local function send(text)
 		for i = math.max(1, #chat.messages - 19), #chat.messages do
 			history[#history + 1] = {r = chat.messages[i].r, t = chat.messages[i].t}
 		end
-		local ok, res = pcall(askAI, history, setStage)
+		local ok, res = pcall(askGemini, history)
 		alive = false
 		if unloaded then busy = false return end
 
 		if ok and type(res) == "table" and res.ok and type(res.text) == "string" then
-			table.insert(chat.messages, {r = "ai", t = res.text, n = res.note})
+			table.insert(chat.messages, {r = "ai", t = res.text})
 			trimMessages(chat)
 			save()
 			if current == chat and row.Parent then
-				renderAIContent(col, res.text, res.note)
+				renderAIContent(col, res.text)
 				scrollDown()
 			end
 		else
